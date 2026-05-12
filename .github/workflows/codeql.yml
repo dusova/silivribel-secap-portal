@@ -1,0 +1,44 @@
+name: "CodeQL Advanced Security"
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '30 2 * * 0' # Her Pazar saat 02:30'da otomatik çalışır
+
+jobs:
+  analyze:
+    name: CodeQL Analizi
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'javascript' ] 
+        # Not: CodeQL PHP dilini tam olarak desteklemez. 
+        # Bu nedenle projedeki arayüz (JS/Frontend) kodlarının analizi için javascript seçilmiştir.
+
+    steps:
+    - name: Depoyu Klonla
+      uses: actions/checkout@v4
+
+    - name: CodeQL Başlat
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        # Daha kapsamlı tarama için aşağıdaki satırı aktif edebilirsiniz:
+        # queries: security-extended,security-and-quality
+
+    - name: Otomatik Derleme
+      uses: github/codeql-action/autobuild@v3
+
+    - name: CodeQL Analizini Gerçekleştir
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
