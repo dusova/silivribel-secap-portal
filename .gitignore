@@ -1,0 +1,17 @@
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+ortam.php
+depolama/gecici-dosyalar/*
+depolama/kanit-dosyalari/*
+depolama/sistem-yedekleri/*
+!depolama/gecici-dosyalar/.gitkeep
+!depolama/kanit-dosyalari/.gitkeep
+!depolama/sistem-yedekleri/.gitkeep
+*.log

@@ -1,0 +1,74 @@
+<FilesMatch "\.(sql|env|log|bak|old|md)$">
+    Require all denied
+</FilesMatch>
+
+<FilesMatch "^(ortam\.php|ornek-ortam-ayarlari\.php|env\.php|env\.example\.php|\.gitignore|web\.config|composer\.json|composer\.lock)$">
+    Require all denied
+</FilesMatch>
+
+# Kök (/) isteği index.php ile karşılanır; aksi halde Options -Indexes → 403 olur.
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(uygulama|veritabani|depolama|includes|database|storage)/ - [F,L]
+    RewriteRule ^\.git - [F,L]
+
+    # Eski İngilizce yollar sessizce yeni Türkçe dosyalara çalışır.
+    RewriteRule ^dashboard/?$ kontrol-merkezi.php [L,QSA]
+    RewriteRule ^dashboard\.php$ kontrol-merkezi.php [L,QSA]
+    RewriteRule ^login/?$ giris.php [L,QSA]
+    RewriteRule ^login\.php$ giris.php [L,QSA]
+    RewriteRule ^logout/?$ cikis.php [L,QSA]
+    RewriteRule ^logout\.php$ cikis.php [L,QSA]
+    RewriteRule ^notifications/?$ bildirimler.php [L,QSA]
+    RewriteRule ^notifications\.php$ bildirimler.php [L,QSA]
+    RewriteRule ^attachment_download/?$ kanit-indir.php [L,QSA]
+    RewriteRule ^attachment_download\.php$ kanit-indir.php [L,QSA]
+    RewriteRule ^backup_download/?$ yedek-indir.php [L,QSA]
+    RewriteRule ^backup_download\.php$ yedek-indir.php [L,QSA]
+
+    RewriteRule ^admin/actions/?$ yonetim/eylemler.php [L,QSA]
+    RewriteRule ^admin/action_form/?$ yonetim/eylem-formu.php [L,QSA]
+    RewriteRule ^admin/activity_form/?$ yonetim/faaliyet-formu.php [L,QSA]
+    RewriteRule ^admin/kpi_form/?$ yonetim/kpi-formu.php [L,QSA]
+    RewriteRule ^admin/entries/?$ yonetim/veri-onay.php [L,QSA]
+    RewriteRule ^admin/monitoring/?$ yonetim/veri-izleme.php [L,QSA]
+    RewriteRule ^admin/export/?$ yonetim/disa-aktar.php [L,QSA]
+    RewriteRule ^admin/help/?$ yonetim/yardim.php [L,QSA]
+    RewriteRule ^admin/operations/?$ yonetim/operasyon.php [L,QSA]
+    RewriteRule ^admin/users/?$ yonetim/kullanicilar.php [L,QSA]
+    RewriteRule ^admin/user_form/?$ yonetim/kullanici-formu.php [L,QSA]
+    RewriteRule ^admin/backups/?$ yonetim/yedekler.php [L,QSA]
+    RewriteRule ^admin/audit_log/?$ yonetim/denetim-gunlugu.php [L,QSA]
+    RewriteRule ^admin/sessions/?$ yonetim/oturumlar.php [L,QSA]
+    RewriteRule ^admin/trash/?$ yonetim/cop-kutusu.php [L,QSA]
+    RewriteRule ^admin/notifications/?$ yonetim/bildirimler-yonlendirme.php [L,QSA]
+
+    RewriteRule ^department/my_actions/?$ mudurluk/eylemlerim.php [L,QSA]
+    RewriteRule ^department/data_form/?$ mudurluk/veri-girisi.php [L,QSA]
+    RewriteRule ^department/my_entries/?$ mudurluk/veri-gecmisim.php [L,QSA]
+    RewriteRule ^department/add_activity/?$ mudurluk/faaliyet-ekle.php [L,QSA]
+    RewriteRule ^department/help/?$ mudurluk/yardim.php [L,QSA]
+
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME}\.php -f
+    RewriteRule ^(.+)$ $1.php [L]
+</IfModule>
+
+Options -Indexes
+
+ErrorDocument 404 /404.php
+ErrorDocument 403 /403.php
+
+
+
+<IfModule mod_headers.c>
+    Header always unset X-Powered-By
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "DENY"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+</IfModule>
