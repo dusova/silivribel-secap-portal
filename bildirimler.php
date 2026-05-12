@@ -194,11 +194,11 @@ require_once APP_ROOT . '/uygulama/yerlesim/ust.php';
 ?>
 <nav class="mt-3">
     <ul class="pagination pagination-sm mb-0 justify-content-center">
-        <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>"><a class="page-link" href="<?= $pageUrl(max(1, $page - 1)) ?>">«</a></li>
+        <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>"><a class="page-link" href="<?= htmlspecialchars($pageUrl(max(1, $page - 1)), ENT_QUOTES, 'UTF-8') ?>">«</a></li>
         <?php for ($p = max(1, $page - 3); $p <= min($totalPages, $page + 3); $p++): ?>
-        <li class="page-item <?= $p === $page ? 'active' : '' ?>"><a class="page-link" href="<?= $pageUrl($p) ?>"><?= $p ?></a></li>
+        <li class="page-item <?= $p === $page ? 'active' : '' ?>"><a class="page-link" href="<?= htmlspecialchars($pageUrl($p), ENT_QUOTES, 'UTF-8') ?>"><?= $p ?></a></li>
         <?php endfor; ?>
-        <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>"><a class="page-link" href="<?= $pageUrl(min($totalPages, $page + 1)) ?>">»</a></li>
+        <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>"><a class="page-link" href="<?= htmlspecialchars($pageUrl(min($totalPages, $page + 1)), ENT_QUOTES, 'UTF-8') ?>">»</a></li>
     </ul>
 </nav>
 <?php endif; ?>

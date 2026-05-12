@@ -356,11 +356,11 @@ require_once APP_ROOT . '/uygulama/yerlesim/ust.php';
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <h5 class="fw-bold mb-0"><i class="bi bi-shield-check me-2 text-primary"></i>Denetim Günlüğü</h5>
-        <small class="text-muted">Sistem işlemleri, kullanıcı hareketleri ve güvenlik kayıtları · Toplam <?= number_format($totalRows, 0, ',', '.') ?> kayıt · Sayfa <?= $page ?>/<?= $totalPages ?></small>
+        <small class="text-muted">Sistem işlemleri, kullanıcı hareketleri ve güvenlik kayıtları · Toplam <?= number_format($totalRows, 0, ',', '.') ?> kayıt · Sayfa <?= (int)$page ?>/<?= (int)$totalPages ?></small>
     </div>
     <div class="d-flex gap-2">
         <a class="btn btn-outline-success btn-sm"
-           href="?<?= http_build_query(array_merge($_GET, ['export' => 'csv'])) ?>">
+           href="?<?= htmlspecialchars(http_build_query(array_merge($_GET, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8') ?>">
             <i class="bi bi-download me-1"></i>CSV Olarak İndir
         </a>
     </div>
@@ -572,26 +572,26 @@ require_once APP_ROOT . '/uygulama/yerlesim/ust.php';
 <nav class="mt-3">
     <ul class="pagination pagination-sm mb-0 justify-content-center">
         <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>">
-            <a class="page-link" href="<?= $pageUrl(max(1, $page - 1)) ?>">«</a>
+            <a class="page-link" href="<?= htmlspecialchars($pageUrl(max(1, $page - 1)), ENT_QUOTES, 'UTF-8') ?>">«</a>
         </li>
         <?php
         $start = max(1, $page - 3);
         $end   = min($totalPages, $page + 3);
         if ($start > 1): ?>
-            <li class="page-item"><a class="page-link" href="<?= $pageUrl(1) ?>">1</a></li>
+            <li class="page-item"><a class="page-link" href="<?= htmlspecialchars($pageUrl(1), ENT_QUOTES, 'UTF-8') ?>">1</a></li>
             <?php if ($start > 2): ?><li class="page-item disabled"><span class="page-link">…</span></li><?php endif; ?>
         <?php endif; ?>
         <?php for ($p = $start; $p <= $end; $p++): ?>
         <li class="page-item <?= $p === $page ? 'active' : '' ?>">
-            <a class="page-link" href="<?= $pageUrl($p) ?>"><?= $p ?></a>
+            <a class="page-link" href="<?= htmlspecialchars($pageUrl($p), ENT_QUOTES, 'UTF-8') ?>"><?= $p ?></a>
         </li>
         <?php endfor; ?>
         <?php if ($end < $totalPages): ?>
             <?php if ($end < $totalPages - 1): ?><li class="page-item disabled"><span class="page-link">…</span></li><?php endif; ?>
-            <li class="page-item"><a class="page-link" href="<?= $pageUrl($totalPages) ?>"><?= $totalPages ?></a></li>
+            <li class="page-item"><a class="page-link" href="<?= htmlspecialchars($pageUrl($totalPages), ENT_QUOTES, 'UTF-8') ?>"><?= (int)$totalPages ?></a></li>
         <?php endif; ?>
         <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>">
-            <a class="page-link" href="<?= $pageUrl(min($totalPages, $page + 1)) ?>">»</a>
+            <a class="page-link" href="<?= htmlspecialchars($pageUrl(min($totalPages, $page + 1)), ENT_QUOTES, 'UTF-8') ?>">»</a>
         </li>
     </ul>
 </nav>

@@ -9,13 +9,20 @@ $pdo = Database::getInstance()->getConnection();
 $pageTitle = 'Sistem Yedekleri';
 $activeNav = 'backups';
 
-function secap_dump_binary(): string
+function secap_dump_binary(): ?string
 {
-    $xampp = '/Applications/XAMPP/xamppfiles/bin/mysqldump';
-    if (is_executable($xampp)) {
-        return $xampp;
+    $allowedPaths = [
+        '/Applications/XAMPP/xamppfiles/bin/mysqldump',
+        '/usr/bin/mysqldump',
+        '/usr/local/bin/mysqldump',
+        'C:\\xampp\\mysql\\bin\\mysqldump.exe',
+    ];
+    foreach ($allowedPaths as $path) {
+        if (is_executable($path)) {
+            return $path;
+        }
     }
-    return 'mysqldump';
+    return null;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -47,35 +54,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = 'PHP exec fonksiyonu kapalı olduğu için mysqldump çalıştırılamadı.';
         } else {
             $binary = secap_dump_binary();
-            $cmd = escapeshellcmd($binary)
-                . ' --host=' . escapeshellarg($host)
-                . ' --port=' . escapeshellarg($port)
-                . ' --user=' . escapeshellarg($user)
-                . ' --single-transaction --skip-lock-tables --triggers --default-character-set=utf8mb4'
-                . ' --result-file=' . escapeshellarg($target)
-                . ' ' . escapeshellarg($db);
-
-            if ($pass !== '') {
-                if (stripos(PHP_OS_FAMILY, 'Windows') === 0) {
-                    $cmd = 'set MYSQL_PWD=' . escapeshellarg($pass) . ' && ' . $cmd;
-                } else {
-                    $cmd = 'MYSQL_PWD=' . escapeshellarg($pass) . ' ' . $cmd;
-                }
-            }
-
-            $output = [];
-            $exitCode = 1;
-            exec($cmd . ' 2>&1', $output, $exitCode);
-            $message = trim(implode("\n", $output));
-            if ($exitCode === 0 && is_file($target) && filesize($target) > 0) {
-                chmod($target, 0664);
-                $status = 'success';
-                $message = $message ?: 'Yedek başarıyla oluşturuldu.';
+            if ($binary === null) {
+                $message = 'mysqldump bulunamadı. İzin verilen yollar kontrol edildi.';
             } else {
-                if (is_file($target) && filesize($target) === 0) {
-                    unlink($target);
+                $cmd = escapeshellcmd($binary)
+                    . ' --host=' . escapeshellarg($host)
+                    . ' --port=' . escapeshellarg($port)
+                    . ' --user=' . escapeshellarg($user)
+                    . ' --single-transaction --skip-lock-tables --triggers --default-character-set=utf8mb4'
+                    . ' --result-file=' . escapeshellarg($target)
+                    . ' ' . escapeshellarg($db);
+
+                if ($pass !== '') {
+                    if (stripos(PHP_OS_FAMILY, 'Windows') === 0) {
+                        $cmd = 'set MYSQL_PWD=' . escapeshellarg($pass) . ' && ' . $cmd;
+                    } else {
+                        $cmd = 'MYSQL_PWD=' . escapeshellarg($pass) . ' ' . $cmd;
+                    }
                 }
-                $message = $message ?: 'mysqldump başarısız oldu.';
+
+                $output = [];
+                $exitCode = 1;
+                exec($cmd . ' 2>&1', $output, $exitCode);
+                $message = trim(implode("\n", $output));
+                if ($exitCode === 0 && is_file($target) && filesize($target) > 0) {
+                    chmod($target, 0664);
+                    $status = 'success';
+                    $message = $message ?: 'Yedek başarıyla oluşturuldu.';
+                } else {
+                    if (is_file($target) && filesize($target) === 0) {
+                        $realTarget = realpath($target);
+                        $realBackupDir = realpath($backupDir);
+                        if ($realTarget !== false && $realBackupDir !== false
+                            && strpos($realTarget, $realBackupDir . DIRECTORY_SEPARATOR) === 0) {
+                            unlink($realTarget);
+                        }
+                    }
+                    $message = $message ?: 'mysqldump başarısız oldu.';
+                }
             }
         }
 
