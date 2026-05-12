@@ -5,6 +5,23 @@ declare(strict_types=1);
 final class NotificationService
 {
     private const PRIORITIES = ['low', 'normal', 'high', 'critical'];
+    private static ?bool $hasLinkColumn = null;
+
+    private static function hasLinkColumn(PDO $pdo): bool
+    {
+        if (self::$hasLinkColumn !== null) {
+            return self::$hasLinkColumn;
+        }
+
+        try {
+            $stmt = $pdo->query("SHOW COLUMNS FROM notifications LIKE 'link'");
+            self::$hasLinkColumn = $stmt !== false && $stmt->fetch() !== false;
+        } catch (PDOException $e) {
+            self::$hasLinkColumn = true;
+        }
+
+        return self::$hasLinkColumn;
+    }
 
     public static function create(
         PDO $pdo,
@@ -46,26 +63,41 @@ final class NotificationService
                 }
             }
 
-            $stmt = $pdo->prepare(
-                "INSERT INTO notifications
-                    (recipient_user_id, event_key, title, message, link, priority,
-                     related_type, related_id, dedupe_key, email_status)
-                 VALUES
-                    (:uid, :event_key, :title, :message, :link, :priority,
-                     :related_type, :related_id, :dedupe_key, :email_status)"
-            );
-            $stmt->execute([
+            $hasLinkColumn = self::hasLinkColumn($pdo);
+            if ($hasLinkColumn) {
+                $stmt = $pdo->prepare(
+                    "INSERT INTO notifications
+                        (recipient_user_id, event_key, title, message, link, priority,
+                         related_type, related_id, dedupe_key, email_status)
+                     VALUES
+                        (:uid, :event_key, :title, :message, :link, :priority,
+                         :related_type, :related_id, :dedupe_key, :email_status)"
+                );
+            } else {
+                $stmt = $pdo->prepare(
+                    "INSERT INTO notifications
+                        (recipient_user_id, event_key, title, message, priority,
+                         related_type, related_id, dedupe_key, email_status)
+                     VALUES
+                        (:uid, :event_key, :title, :message, :priority,
+                         :related_type, :related_id, :dedupe_key, :email_status)"
+                );
+            }
+            $params = [
                 ':uid' => $recipientUserId,
                 ':event_key' => $eventKey,
                 ':title' => $title,
                 ':message' => $message,
-                ':link' => self::sanitizeLink($link),
                 ':priority' => $priority,
                 ':related_type' => $relatedType !== null ? mb_substr($relatedType, 0, 80) : null,
                 ':related_id' => $relatedId,
                 ':dedupe_key' => $dedupeKey,
                 ':email_status' => $email ? 'skipped' : 'not_required',
-            ]);
+            ];
+            if ($hasLinkColumn) {
+                $params[':link'] = self::sanitizeLink($link);
+            }
+            $stmt->execute($params);
             $notificationId = (int) $pdo->lastInsertId();
 
             if ($email) {
@@ -406,18 +438,33 @@ final class NotificationService
     public static function latest(PDO $pdo, int $userId, int $limit = 10): array
     {
         $limit = max(1, min(30, $limit));
-        $stmt = $pdo->prepare(
-            "SELECT id, event_key, title, message, link, priority, is_read, created_at
-             FROM notifications
-             WHERE recipient_user_id = :uid
-             ORDER BY created_at DESC
-             LIMIT :limit"
-        );
-        $stmt->bindValue(':uid', $userId, PDO::PARAM_INT);
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->execute();
+        try {
+            if (self::hasLinkColumn($pdo)) {
+                $stmt = $pdo->prepare(
+                    "SELECT id, event_key, title, message, link, priority, is_read, created_at
+                     FROM notifications
+                     WHERE recipient_user_id = :uid
+                     ORDER BY created_at DESC
+                     LIMIT :limit"
+                );
+            } else {
+                $stmt = $pdo->prepare(
+                    "SELECT id, event_key, title, message, NULL AS link, priority, is_read, created_at
+                     FROM notifications
+                     WHERE recipient_user_id = :uid
+                     ORDER BY created_at DESC
+                     LIMIT :limit"
+                );
+            }
+            $stmt->bindValue(':uid', $userId, PDO::PARAM_INT);
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+            $stmt->execute();
 
-        return array_map([self::class, 'decorate'], $stmt->fetchAll());
+            return array_map([self::class, 'decorate'], $stmt->fetchAll());
+        } catch (PDOException $e) {
+            error_log('[SECAP][NOTIFY] Bildirim listesi okunamadı: ' . $e->getMessage());
+            return [];
+        }
     }
 
     public static function markRead(PDO $pdo, int $userId, int $notificationId): bool

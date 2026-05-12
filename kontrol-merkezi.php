@@ -81,18 +81,23 @@ if ($isAdmin) {
             "SELECT COUNT(DISTINCT k.id)
              FROM kpis k
              JOIN actions a ON a.id = k.action_id
-             LEFT JOIN action_departments ad
-                    ON ad.action_id = a.id
-                   AND ad.department_id = :ad_dept_id
              WHERE k.is_active = 1
                AND k.deleted_at IS NULL
                AND a.deleted_at IS NULL
                AND a.status != 'cancelled'
-               AND (a.responsible_department_id = :owner_dept_id OR ad.department_id IS NOT NULL)"
+               AND (
+                   a.responsible_department_id = :dept_id
+                   OR EXISTS (
+                       SELECT 1
+                       FROM action_departments ad
+                       WHERE ad.action_id = a.id
+                         AND ad.department_id = :dept_id_extra
+                   )
+               )"
         );
         $kpiStmt->execute([
-            ':ad_dept_id' => $deptId,
-            ':owner_dept_id' => $deptId,
+            ':dept_id' => $deptId,
+            ':dept_id_extra' => $deptId,
         ]);
         $stats['total_kpis'] = (int) $kpiStmt->fetchColumn();
 
@@ -107,12 +112,17 @@ if ($isAdmin) {
 	                   AND de.department_id = ?
 	                   AND de.year = YEAR(NOW())
 	                   AND de.deleted_at IS NULL
-	             LEFT JOIN action_departments ad
-	                    ON ad.action_id = a.id
-	                   AND ad.department_id = ?
 	             WHERE  a.deleted_at IS NULL
 	               AND  a.status != 'cancelled'
-	               AND  (a.responsible_department_id = ? OR ad.department_id IS NOT NULL)
+	               AND  (
+	                   a.responsible_department_id = ?
+	                   OR EXISTS (
+	                       SELECT 1
+	                       FROM action_departments ad
+	                       WHERE ad.action_id = a.id
+	                         AND ad.department_id = ?
+	                   )
+	               )
 	             GROUP  BY a.id
 	             ORDER  BY a.code"
         );
