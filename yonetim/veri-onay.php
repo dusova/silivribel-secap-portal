@@ -190,14 +190,6 @@ if (!array_key_exists($filterWorkflow, $workflowOptions)) {
     $filterWorkflow = '';
 }
 
-$where  = ['de.deleted_at IS NULL', 'a.deleted_at IS NULL'];
-$params = [];
-
-if ($filterYear > 0)    { $where[] = 'de.year = :year';           $params[':year'] = $filterYear; }
-if ($filterDept > 0)    { $where[] = 'de.department_id = :dept';  $params[':dept'] = $filterDept; }
-if ($filterVerified !== '') { $where[] = 'de.is_verified = :ver'; $params[':ver'] = (int)$filterVerified; }
-if ($filterWorkflow !== '') { $where[] = 'de.workflow_status = :workflow'; $params[':workflow'] = $filterWorkflow; }
-
 $stmt = $pdo->prepare(
     "SELECT de.*, k.name AS kpi_name, k.unit, a.code AS action_code, a.title AS action_title,
             d.name AS dept_name, u.full_name AS entered_by_name,
@@ -210,11 +202,25 @@ $stmt = $pdo->prepare(
      JOIN   departments d  ON d.id  = de.department_id
      JOIN   users   u  ON u.id  = de.entered_by
      LEFT JOIN users vu ON vu.id = de.verified_by
-     WHERE  " . implode(' AND ', $where) . "
+     WHERE  de.deleted_at IS NULL
+       AND  a.deleted_at IS NULL
+       AND  (:year_filter_on = 0 OR de.year = :year_value)
+       AND  (:dept_filter_on = 0 OR de.department_id = :dept_id)
+       AND  (:verified_filter_on = 0 OR de.is_verified = :verified_value)
+       AND  (:workflow_filter_on = 0 OR de.workflow_status = :workflow_value)
      ORDER  BY de.created_at DESC
      LIMIT 200"
 );
-$stmt->execute($params);
+$stmt->execute([
+    ':year_filter_on' => $filterYear > 0 ? 1 : 0,
+    ':year_value' => $filterYear,
+    ':dept_filter_on' => $filterDept > 0 ? 1 : 0,
+    ':dept_id' => $filterDept,
+    ':verified_filter_on' => $filterVerified !== '' ? 1 : 0,
+    ':verified_value' => (int) $filterVerified,
+    ':workflow_filter_on' => $filterWorkflow !== '' ? 1 : 0,
+    ':workflow_value' => $filterWorkflow,
+]);
 $entries = $stmt->fetchAll();
 
 $departments = $pdo->query("SELECT id, name FROM departments WHERE is_active=1 ORDER BY name")->fetchAll();

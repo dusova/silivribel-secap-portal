@@ -38,21 +38,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['soft_delete_id'])) {
 $filterDept   = (int)($_GET['dept_id']  ?? 0);
 $filterStatus = $_GET['status'] ?? '';
 
-$where  = ['a.deleted_at IS NULL'];
-$params = [];
-if ($filterDept > 0)    { $where[] = 'a.responsible_department_id = :dept'; $params[':dept'] = $filterDept; }
-if ($filterStatus !== ''){ $where[] = 'a.status = :st';                     $params[':st'] = $filterStatus; }
-
 $stmt = $pdo->prepare(
     "SELECT a.*, d.name AS dept_name,
             (SELECT COUNT(*) FROM activities act WHERE act.action_id = a.id AND act.is_active = 1 AND act.deleted_at IS NULL) AS activity_count,
             (SELECT COUNT(*) FROM kpis k WHERE k.action_id = a.id AND k.is_active = 1 AND k.deleted_at IS NULL) AS kpi_count
      FROM   actions a
      JOIN   departments d ON d.id = a.responsible_department_id
-     WHERE  " . implode(' AND ', $where) . "
+     WHERE  a.deleted_at IS NULL
+       AND  (:dept_filter_on = 0 OR a.responsible_department_id = :dept_id)
+       AND  (:status_filter_on = 0 OR a.status = :status_value)
      ORDER  BY a.code"
 );
-$stmt->execute($params);
+$stmt->execute([
+    ':dept_filter_on' => $filterDept > 0 ? 1 : 0,
+    ':dept_id' => $filterDept,
+    ':status_filter_on' => $filterStatus !== '' ? 1 : 0,
+    ':status_value' => $filterStatus,
+]);
 $actions = $stmt->fetchAll();
 
 $departments = $pdo->query("SELECT id, name FROM departments WHERE is_active=1 ORDER BY name")->fetchAll();

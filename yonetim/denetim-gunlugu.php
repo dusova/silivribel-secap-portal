@@ -104,29 +104,14 @@ $perPage       = (int)($_GET['per_page'] ?? 50);
 if (!in_array($perPage, [50, 100, 200], true)) $perPage = 50;
 $page = max(1, (int)($_GET['page'] ?? 1));
 
-$where  = [];
-$params = [];
-
-if ($filterUser > 0)            { $where[] = 'al.user_id = :uid';        $params[':uid']  = $filterUser; }
-if ($filterEntity !== '')       { $where[] = 'al.entity_type = :etype';  $params[':etype'] = $filterEntity; }
-if ($filterAction !== '')       { $where[] = 'al.action = :act';         $params[':act']   = $filterAction; }
-if ($filterDateFrom !== '')     { $where[] = 'al.created_at >= :dfrom';  $params[':dfrom'] = $filterDateFrom . ' 00:00:00'; }
-if ($filterDateTo !== '')       { $where[] = 'al.created_at <= :dto';    $params[':dto']   = $filterDateTo   . ' 23:59:59'; }
 $likeEscape = static function (string $s): string {
     return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $s);
 };
 
-if ($filterIp !== '') {
-    $where[] = "al.ip_address LIKE :ip ESCAPE '\\\\'";
-    $params[':ip'] = '%' . $likeEscape($filterIp) . '%';
-}
-if ($filterSession !== '') {
-    $where[] = "al.session_id LIKE :sid ESCAPE '\\\\'";
-    $params[':sid'] = '%' . $likeEscape($filterSession) . '%';
-}
-
 $filterSearchTooShort = false;
 $filterDeepSearch     = isset($_GET['deep_search']) && $_GET['deep_search'] === '1';
+$searchFilterOn        = false;
+$searchPattern         = '';
 $searchLen = function_exists('mb_strlen')
     ? mb_strlen($filterSearch)
     : strlen($filterSearch);
@@ -134,36 +119,59 @@ if ($filterSearch !== '') {
     if ($searchLen < 3) {
         $filterSearchTooShort = true;
     } else {
-        $escaped = $likeEscape($filterSearch);
-        $pattern = '%' . $escaped . '%';
-        
-        if ($filterDeepSearch) {
-            $where[] = "(al.old_value LIKE :q1 ESCAPE '\\\\' OR al.new_value LIKE :q2 ESCAPE '\\\\' OR al.actor_full_name LIKE :q3 ESCAPE '\\\\' OR al.request_uri LIKE :q4 ESCAPE '\\\\')";
-            $params[':q1'] = $pattern;
-            $params[':q2'] = $pattern;
-            $params[':q3'] = $pattern;
-            $params[':q4'] = $pattern;
-        } else {
-            $where[] = "(al.actor_full_name LIKE :q1 ESCAPE '\\\\' OR al.request_uri LIKE :q2 ESCAPE '\\\\')";
-            $params[':q1'] = $pattern;
-            $params[':q2'] = $pattern;
-        }
+        $searchFilterOn = true;
+        $searchPattern = '%' . $likeEscape($filterSearch) . '%';
     }
 }
 
-$whereSql = empty($where) ? '' : 'WHERE ' . implode(' AND ', $where);
+$auditParams = [
+    ':user_filter_on' => $filterUser > 0 ? 1 : 0,
+    ':user_id_value' => $filterUser,
+    ':entity_filter_on' => $filterEntity !== '' ? 1 : 0,
+    ':entity_type_value' => $filterEntity,
+    ':action_filter_on' => $filterAction !== '' ? 1 : 0,
+    ':action_value' => $filterAction,
+    ':date_from_filter_on' => $filterDateFrom !== '' ? 1 : 0,
+    ':date_from_value' => $filterDateFrom . ' 00:00:00',
+    ':date_to_filter_on' => $filterDateTo !== '' ? 1 : 0,
+    ':date_to_value' => $filterDateTo . ' 23:59:59',
+    ':ip_filter_on' => $filterIp !== '' ? 1 : 0,
+    ':ip_value' => '%' . $likeEscape($filterIp) . '%',
+    ':session_filter_on' => $filterSession !== '' ? 1 : 0,
+    ':session_value' => '%' . $likeEscape($filterSession) . '%',
+    ':search_filter_on' => $searchFilterOn ? 1 : 0,
+    ':search_actor_value' => $searchPattern,
+    ':search_uri_value' => $searchPattern,
+    ':deep_search_on' => $filterDeepSearch ? 1 : 0,
+    ':search_old_value' => $searchPattern,
+    ':search_new_value' => $searchPattern,
+];
 
 $isCsvExport = isset($_GET['export']) && $_GET['export'] === 'csv';
 
 if ($isCsvExport) {
-    $sql = "SELECT al.*, u.full_name AS user_full_name, u.username AS user_username
-            FROM audit_log al
-            LEFT JOIN users u ON u.id = al.user_id
-            {$whereSql}
-            ORDER BY al.created_at DESC
-            LIMIT 10000";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
+    $stmt = $pdo->prepare(
+        "SELECT al.*, u.full_name AS user_full_name, u.username AS user_username
+         FROM audit_log al
+         LEFT JOIN users u ON u.id = al.user_id
+         WHERE (:user_filter_on = 0 OR al.user_id = :user_id_value)
+           AND (:entity_filter_on = 0 OR al.entity_type = :entity_type_value)
+           AND (:action_filter_on = 0 OR al.action = :action_value)
+           AND (:date_from_filter_on = 0 OR al.created_at >= :date_from_value)
+           AND (:date_to_filter_on = 0 OR al.created_at <= :date_to_value)
+           AND (:ip_filter_on = 0 OR al.ip_address LIKE :ip_value ESCAPE '\\\\')
+           AND (:session_filter_on = 0 OR al.session_id LIKE :session_value ESCAPE '\\\\')
+           AND (:search_filter_on = 0
+                OR al.actor_full_name LIKE :search_actor_value ESCAPE '\\\\'
+                OR al.request_uri LIKE :search_uri_value ESCAPE '\\\\'
+                OR (:deep_search_on = 1 AND (
+                    al.old_value LIKE :search_old_value ESCAPE '\\\\'
+                    OR al.new_value LIKE :search_new_value ESCAPE '\\\\'
+                )))
+         ORDER BY al.created_at DESC
+         LIMIT 10000"
+    );
+    $stmt->execute($auditParams);
     $rows = $stmt->fetchAll();
 
     $activeFilterKeys = [];
@@ -220,22 +228,52 @@ if ($isCsvExport) {
     exit;
 }
 
-$countSql = "SELECT COUNT(*) FROM audit_log al {$whereSql}";
-$countStmt = $pdo->prepare($countSql);
-$countStmt->execute($params);
+$countStmt = $pdo->prepare(
+    "SELECT COUNT(*)
+     FROM audit_log al
+     WHERE (:user_filter_on = 0 OR al.user_id = :user_id_value)
+       AND (:entity_filter_on = 0 OR al.entity_type = :entity_type_value)
+       AND (:action_filter_on = 0 OR al.action = :action_value)
+       AND (:date_from_filter_on = 0 OR al.created_at >= :date_from_value)
+       AND (:date_to_filter_on = 0 OR al.created_at <= :date_to_value)
+       AND (:ip_filter_on = 0 OR al.ip_address LIKE :ip_value ESCAPE '\\\\')
+       AND (:session_filter_on = 0 OR al.session_id LIKE :session_value ESCAPE '\\\\')
+       AND (:search_filter_on = 0
+            OR al.actor_full_name LIKE :search_actor_value ESCAPE '\\\\'
+            OR al.request_uri LIKE :search_uri_value ESCAPE '\\\\'
+            OR (:deep_search_on = 1 AND (
+                al.old_value LIKE :search_old_value ESCAPE '\\\\'
+                OR al.new_value LIKE :search_new_value ESCAPE '\\\\'
+            )))"
+);
+$countStmt->execute($auditParams);
 $totalRows = (int) $countStmt->fetchColumn();
 $totalPages = max(1, (int) ceil($totalRows / $perPage));
 if ($page > $totalPages) $page = $totalPages;
 $offset = ($page - 1) * $perPage;
 
-$sql = "SELECT al.*, u.full_name AS user_full_name, u.username AS user_username
-        FROM audit_log al
-        LEFT JOIN users u ON u.id = al.user_id
-        {$whereSql}
-        ORDER BY al.created_at DESC
-        LIMIT :lim OFFSET :off";
-$stmt = $pdo->prepare($sql);
-foreach ($params as $k => $v) {
+$stmt = $pdo->prepare(
+    "SELECT al.*, u.full_name AS user_full_name, u.username AS user_username
+     FROM audit_log al
+     LEFT JOIN users u ON u.id = al.user_id
+     WHERE (:user_filter_on = 0 OR al.user_id = :user_id_value)
+       AND (:entity_filter_on = 0 OR al.entity_type = :entity_type_value)
+       AND (:action_filter_on = 0 OR al.action = :action_value)
+       AND (:date_from_filter_on = 0 OR al.created_at >= :date_from_value)
+       AND (:date_to_filter_on = 0 OR al.created_at <= :date_to_value)
+       AND (:ip_filter_on = 0 OR al.ip_address LIKE :ip_value ESCAPE '\\\\')
+       AND (:session_filter_on = 0 OR al.session_id LIKE :session_value ESCAPE '\\\\')
+       AND (:search_filter_on = 0
+            OR al.actor_full_name LIKE :search_actor_value ESCAPE '\\\\'
+            OR al.request_uri LIKE :search_uri_value ESCAPE '\\\\'
+            OR (:deep_search_on = 1 AND (
+                al.old_value LIKE :search_old_value ESCAPE '\\\\'
+                OR al.new_value LIKE :search_new_value ESCAPE '\\\\'
+            )))
+     ORDER BY al.created_at DESC
+     LIMIT :lim OFFSET :off"
+);
+foreach ($auditParams as $k => $v) {
     $stmt->bindValue($k, $v);
 }
 $stmt->bindValue(':lim', $perPage, PDO::PARAM_INT);
@@ -251,6 +289,38 @@ $users = $pdo->query(
 )->fetchAll();
 
 $entityTypes = $pdo->query('SELECT DISTINCT entity_type FROM audit_log ORDER BY entity_type')->fetchAll(PDO::FETCH_COLUMN);
+
+$auditFilterQuery = [];
+if ($filterUser > 0) {
+    $auditFilterQuery['user_id'] = $filterUser;
+}
+if ($filterEntity !== '') {
+    $auditFilterQuery['entity_type'] = $filterEntity;
+}
+if ($filterAction !== '') {
+    $auditFilterQuery['action'] = $filterAction;
+}
+if ($filterDateFrom !== '') {
+    $auditFilterQuery['date_from'] = $filterDateFrom;
+}
+if ($filterDateTo !== '') {
+    $auditFilterQuery['date_to'] = $filterDateTo;
+}
+if ($filterIp !== '') {
+    $auditFilterQuery['ip'] = $filterIp;
+}
+if ($filterSession !== '') {
+    $auditFilterQuery['session_id'] = $filterSession;
+}
+if ($searchFilterOn) {
+    $auditFilterQuery['q'] = $filterSearch;
+}
+if ($filterDeepSearch) {
+    $auditFilterQuery['deep_search'] = '1';
+}
+if ($perPage !== 50) {
+    $auditFilterQuery['per_page'] = $perPage;
+}
 
 function audit_parse_json($raw): array
 {
@@ -356,11 +426,11 @@ require_once APP_ROOT . '/uygulama/yerlesim/ust.php';
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <h5 class="fw-bold mb-0"><i class="bi bi-shield-check me-2 text-primary"></i>Denetim Günlüğü</h5>
-        <small class="text-muted">Sistem işlemleri, kullanıcı hareketleri ve güvenlik kayıtları · Toplam <?= number_format($totalRows, 0, ',', '.') ?> kayıt · Sayfa <?= (int)$page ?>/<?= (int)$totalPages ?></small>
+        <small class="text-muted">Sistem işlemleri, kullanıcı hareketleri ve güvenlik kayıtları · Toplam <?php echo number_format($totalRows, 0, ',', '.'); ?> kayıt · Sayfa <?php echo htmlentities((string) (int) $page, ENT_QUOTES, 'UTF-8'); ?>/<?php echo htmlentities((string) (int) $totalPages, ENT_QUOTES, 'UTF-8'); ?></small>
     </div>
     <div class="d-flex gap-2">
         <a class="btn btn-outline-success btn-sm"
-           href="?<?= htmlspecialchars(http_build_query(array_merge($_GET, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8') ?>">
+           href="?<?php echo htmlspecialchars(http_build_query(array_merge($auditFilterQuery, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8'); ?>">
             <i class="bi bi-download me-1"></i>CSV Olarak İndir
         </a>
     </div>
@@ -563,35 +633,34 @@ require_once APP_ROOT . '/uygulama/yerlesim/ust.php';
 </div>
 
 <?php if ($totalPages > 1):
-    $baseQuery = $_GET;
-    unset($baseQuery['page']);
+    $baseQuery = $auditFilterQuery;
     $pageUrl = function (int $p) use ($baseQuery) {
         return '?' . http_build_query(array_merge($baseQuery, ['page' => $p]));
     };
 ?>
 <nav class="mt-3">
     <ul class="pagination pagination-sm mb-0 justify-content-center">
-        <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>">
-            <a class="page-link" href="<?= htmlspecialchars($pageUrl(max(1, $page - 1)), ENT_QUOTES, 'UTF-8') ?>">«</a>
+        <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+            <a class="page-link" href="<?php echo htmlspecialchars($pageUrl(max(1, $page - 1)), ENT_QUOTES, 'UTF-8'); ?>">«</a>
         </li>
         <?php
         $start = max(1, $page - 3);
         $end   = min($totalPages, $page + 3);
         if ($start > 1): ?>
-            <li class="page-item"><a class="page-link" href="<?= htmlspecialchars($pageUrl(1), ENT_QUOTES, 'UTF-8') ?>">1</a></li>
+            <li class="page-item"><a class="page-link" href="<?php echo htmlspecialchars($pageUrl(1), ENT_QUOTES, 'UTF-8'); ?>">1</a></li>
             <?php if ($start > 2): ?><li class="page-item disabled"><span class="page-link">…</span></li><?php endif; ?>
         <?php endif; ?>
         <?php for ($p = $start; $p <= $end; $p++): ?>
-        <li class="page-item <?= $p === $page ? 'active' : '' ?>">
-            <a class="page-link" href="<?= htmlspecialchars($pageUrl($p), ENT_QUOTES, 'UTF-8') ?>"><?= $p ?></a>
+        <li class="page-item <?php echo $p === $page ? 'active' : ''; ?>">
+            <a class="page-link" href="<?php echo htmlspecialchars($pageUrl($p), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlentities((string) (int) $p, ENT_QUOTES, 'UTF-8'); ?></a>
         </li>
         <?php endfor; ?>
         <?php if ($end < $totalPages): ?>
             <?php if ($end < $totalPages - 1): ?><li class="page-item disabled"><span class="page-link">…</span></li><?php endif; ?>
-            <li class="page-item"><a class="page-link" href="<?= htmlspecialchars($pageUrl($totalPages), ENT_QUOTES, 'UTF-8') ?>"><?= (int)$totalPages ?></a></li>
+            <li class="page-item"><a class="page-link" href="<?php echo htmlspecialchars($pageUrl($totalPages), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlentities((string) (int) $totalPages, ENT_QUOTES, 'UTF-8'); ?></a></li>
         <?php endif; ?>
-        <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>">
-            <a class="page-link" href="<?= htmlspecialchars($pageUrl(min($totalPages, $page + 1)), ENT_QUOTES, 'UTF-8') ?>">»</a>
+        <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
+            <a class="page-link" href="<?php echo htmlspecialchars($pageUrl(min($totalPages, $page + 1)), ENT_QUOTES, 'UTF-8'); ?>">»</a>
         </li>
     </ul>
 </nav>

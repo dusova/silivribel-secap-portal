@@ -12,24 +12,21 @@ $activeNav = 'monitoring';
 $filterYear = (int)($_GET['year'] ?? date('Y'));
 $filterDept = (int)($_GET['dept_id'] ?? 0);
 
-$where = ["a.status != 'cancelled'", "a.deleted_at IS NULL"];
-$params = [];
-
-if ($filterDept > 0) {
-    $where[] = 'a.responsible_department_id = :dept_id';
-    $params[':dept_id'] = $filterDept;
-}
-
-$sql = "SELECT a.id, a.code, a.title, a.description, a.performance_indicators,
-               a.category, a.status, a.start_year, a.end_year,
-               d.name AS dept_name
-        FROM   actions a
-        JOIN   departments d ON d.id = a.responsible_department_id
-        WHERE  " . implode(' AND ', $where) . "
-        ORDER  BY a.code";
-
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
+$stmt = $pdo->prepare(
+    "SELECT a.id, a.code, a.title, a.description, a.performance_indicators,
+            a.category, a.status, a.start_year, a.end_year,
+            d.name AS dept_name
+     FROM   actions a
+     JOIN   departments d ON d.id = a.responsible_department_id
+     WHERE  a.status != 'cancelled'
+       AND  a.deleted_at IS NULL
+       AND  (:dept_filter_on = 0 OR a.responsible_department_id = :dept_id)
+     ORDER  BY a.code"
+);
+$stmt->execute([
+    ':dept_filter_on' => $filterDept > 0 ? 1 : 0,
+    ':dept_id' => $filterDept,
+]);
 $actions = $stmt->fetchAll();
 
 $actionIds = array_column($actions, 'id');

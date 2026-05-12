@@ -168,7 +168,7 @@ require_once APP_ROOT . '/uygulama/yerlesim/ust.php';
                         <form method="POST" class="d-inline" onsubmit="return confirm('Kayıt geri alınacak. Onaylıyor musunuz?');">
                             <?= Csrf::field() ?>
                             <input type="hidden" name="restore_table" value="<?= htmlspecialchars($currentTab, ENT_QUOTES, 'UTF-8') ?>">
-                            <input type="hidden" name="restore_id" value="<?= (int) $r['id'] ?>">
+                            <input type="hidden" name="restore_id" value="<?= htmlentities((string) (int) $r['id'], ENT_QUOTES, 'UTF-8') ?>">
                             <button type="submit" class="btn btn-sm btn-outline-success">
                                 <i class="bi bi-arrow-counterclockwise me-1"></i>Geri Al
                             </button>

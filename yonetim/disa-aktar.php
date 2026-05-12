@@ -41,12 +41,6 @@ $workflowLabels = [
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['download_pdf'])) {
     Csrf::check();
 
-    $where = ['de.deleted_at IS NULL', 'a.deleted_at IS NULL'];
-    $params = [];
-    if ($filterYear > 0) { $where[] = 'de.year = :year'; $params[':year'] = $filterYear; }
-    if ($filterDept > 0) { $where[] = 'de.department_id = :dept_id'; $params[':dept_id'] = $filterDept; }
-    if ($filterWorkflow !== '') { $where[] = 'de.workflow_status = :workflow_status'; $params[':workflow_status'] = $filterWorkflow; }
-
     $stmt = $pdo->prepare(
         "SELECT de.year, de.value, de.workflow_status,
                 a.code AS action_code, a.title AS action_title,
@@ -56,11 +50,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['download_pdf'])) {
          JOIN kpis k ON k.id = de.kpi_id
          JOIN actions a ON a.id = de.action_id
          JOIN departments d ON d.id = de.department_id
-         WHERE " . implode(' AND ', $where) . "
+         WHERE de.deleted_at IS NULL
+           AND a.deleted_at IS NULL
+           AND (:year_filter_on = 0 OR de.year = :year_value)
+           AND (:dept_filter_on = 0 OR de.department_id = :dept_id)
+           AND (:workflow_filter_on = 0 OR de.workflow_status = :workflow_value)
          ORDER BY d.name, a.code, k.name, de.year DESC
          LIMIT 240"
     );
-    $stmt->execute($params);
+    $stmt->execute([
+        ':year_filter_on' => $filterYear > 0 ? 1 : 0,
+        ':year_value' => $filterYear,
+        ':dept_filter_on' => $filterDept > 0 ? 1 : 0,
+        ':dept_id' => $filterDept,
+        ':workflow_filter_on' => $filterWorkflow !== '' ? 1 : 0,
+        ':workflow_value' => $filterWorkflow,
+    ]);
     $pdfRows = [];
     foreach ($stmt->fetchAll() as $row) {
         $pdfRows[] = [
@@ -364,12 +369,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['download'])) {
         'footer'     => $footer,
     ]);
 
-    $where = ['de.deleted_at IS NULL', 'a.deleted_at IS NULL'];
-    $params = [];
-    if ($yearFilter) { $where[] = 'de.year = :year'; $params[':year'] = $filterYear; }
-    if ($deptFilter) { $where[] = 'de.department_id = :dept_id'; $params[':dept_id'] = $filterDept; }
-    if ($filterWorkflow !== '') { $where[] = 'de.workflow_status = :workflow_status'; $params[':workflow_status'] = $filterWorkflow; }
-
     $entryStmt = $pdo->prepare("
         SELECT a.code AS action_code, a.title AS action_title, a.category,
                d.name AS dept_name,
@@ -388,10 +387,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['download'])) {
         JOIN departments d ON d.id = de.department_id
         JOIN users u ON u.id = de.entered_by
         LEFT JOIN users vu ON vu.id = de.verified_by
-        WHERE " . implode(' AND ', $where) . "
+        WHERE de.deleted_at IS NULL
+          AND a.deleted_at IS NULL
+          AND (:year_filter_on = 0 OR de.year = :year_value)
+          AND (:dept_filter_on = 0 OR de.department_id = :dept_id)
+          AND (:workflow_filter_on = 0 OR de.workflow_status = :workflow_value)
         ORDER BY d.name, a.code, k.name, de.year DESC
     ");
-    $entryStmt->execute($params);
+    $entryStmt->execute([
+        ':year_filter_on' => $yearFilter ? 1 : 0,
+        ':year_value' => $filterYear,
+        ':dept_filter_on' => $deptFilter ? 1 : 0,
+        ':dept_id' => $filterDept,
+        ':workflow_filter_on' => $filterWorkflow !== '' ? 1 : 0,
+        ':workflow_value' => $filterWorkflow,
+    ]);
     $entries = $entryStmt->fetchAll();
 
     $entryHeaderRows = buildBrandedHeader(17,

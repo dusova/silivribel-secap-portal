@@ -77,12 +77,23 @@ if ($isAdmin) {
     ];
 
     if (!empty($accessibleActionIds)) {
-        $inClause = Auth::getSqlPlaceholders($accessibleActionIds);
-
         $kpiStmt = $pdo->prepare(
-            "SELECT COUNT(*) FROM kpis WHERE action_id IN ({$inClause}) AND is_active = 1 AND deleted_at IS NULL"
+            "SELECT COUNT(DISTINCT k.id)
+             FROM kpis k
+             JOIN actions a ON a.id = k.action_id
+             LEFT JOIN action_departments ad
+                    ON ad.action_id = a.id
+                   AND ad.department_id = :ad_dept_id
+             WHERE k.is_active = 1
+               AND k.deleted_at IS NULL
+               AND a.deleted_at IS NULL
+               AND a.status != 'cancelled'
+               AND (a.responsible_department_id = :owner_dept_id OR ad.department_id IS NOT NULL)"
         );
-        $kpiStmt->execute($accessibleActionIds);
+        $kpiStmt->execute([
+            ':ad_dept_id' => $deptId,
+            ':owner_dept_id' => $deptId,
+        ]);
         $stats['total_kpis'] = (int) $kpiStmt->fetchColumn();
 
         $actionProgress = $pdo->prepare(
@@ -93,15 +104,19 @@ if ($isAdmin) {
              LEFT JOIN kpis k  ON k.action_id = a.id AND k.is_active = 1 AND k.deleted_at IS NULL
              LEFT JOIN data_entries de
                     ON de.action_id = a.id
-                   AND de.department_id = ?
-                   AND de.year = YEAR(NOW())
-                   AND de.deleted_at IS NULL
-             WHERE  a.id IN ({$inClause})
-               AND  a.deleted_at IS NULL
-             GROUP  BY a.id
-             ORDER  BY a.code"
+	                   AND de.department_id = ?
+	                   AND de.year = YEAR(NOW())
+	                   AND de.deleted_at IS NULL
+	             LEFT JOIN action_departments ad
+	                    ON ad.action_id = a.id
+	                   AND ad.department_id = ?
+	             WHERE  a.deleted_at IS NULL
+	               AND  a.status != 'cancelled'
+	               AND  (a.responsible_department_id = ? OR ad.department_id IS NOT NULL)
+	             GROUP  BY a.id
+	             ORDER  BY a.code"
         );
-        $actionProgress->execute(array_merge([$deptId], $accessibleActionIds));
+        $actionProgress->execute([$deptId, $deptId, $deptId]);
         $actionProgress = $actionProgress->fetchAll();
     } else {
         $actionProgress = [];

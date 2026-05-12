@@ -49,24 +49,24 @@ $filterStatus = trim((string) ($_GET['status'] ?? ''));
 $page         = max(1, (int) ($_GET['page'] ?? 1));
 $perPage      = 30;
 
-$where  = ['n.recipient_user_id = :uid'];
-$params = [':uid' => (int) $userId];
+$typeFilterOn = $filterType !== '' && isset($labels[$filterType]);
+$statusFilterOn = in_array($filterStatus, ['0', '1'], true);
+$notificationParams = [
+    ':uid' => (int) $userId,
+    ':type_filter_on' => $typeFilterOn ? 1 : 0,
+    ':event_key' => $typeFilterOn ? $filterType : '',
+    ':status_filter_on' => $statusFilterOn ? 1 : 0,
+    ':status_value' => $statusFilterOn ? (int) $filterStatus : 0,
+];
 
-if ($filterType !== '' && isset($labels[$filterType])) {
-    $where[] = 'n.event_key = :event_key';
-    $params[':event_key'] = $filterType;
-}
-if ($filterStatus === '0') {
-    $where[] = 'n.is_read = 0';
-}
-if ($filterStatus === '1') {
-    $where[] = 'n.is_read = 1';
-}
-
-$whereSql = 'WHERE ' . implode(' AND ', $where);
-
-$countStmt = $pdo->prepare("SELECT COUNT(*) FROM notifications n {$whereSql}");
-$countStmt->execute($params);
+$countStmt = $pdo->prepare(
+    "SELECT COUNT(*)
+     FROM notifications n
+     WHERE n.recipient_user_id = :uid
+       AND (:type_filter_on = 0 OR n.event_key = :event_key)
+       AND (:status_filter_on = 0 OR n.is_read = :status_value)"
+);
+$countStmt->execute($notificationParams);
 $total      = (int) $countStmt->fetchColumn();
 $totalPages = max(1, (int) ceil($total / $perPage));
 if ($page > $totalPages) {
@@ -77,11 +77,13 @@ $offset = ($page - 1) * $perPage;
 $stmt = $pdo->prepare(
     "SELECT n.*
      FROM notifications n
-     {$whereSql}
+     WHERE n.recipient_user_id = :uid
+       AND (:type_filter_on = 0 OR n.event_key = :event_key)
+       AND (:status_filter_on = 0 OR n.is_read = :status_value)
      ORDER BY n.created_at DESC
      LIMIT :lim OFFSET :off"
 );
-foreach ($params as $key => $value) {
+foreach ($notificationParams as $key => $value) {
     $stmt->bindValue($key, $value);
 }
 $stmt->bindValue(':lim', $perPage, PDO::PARAM_INT);
@@ -186,19 +188,24 @@ require_once APP_ROOT . '/uygulama/yerlesim/ust.php';
 </div>
 
 <?php if ($totalPages > 1):
-    $baseQuery = $_GET;
-    unset($baseQuery['page']);
+    $baseQuery = [];
+    if ($typeFilterOn) {
+        $baseQuery['type'] = $filterType;
+    }
+    if ($statusFilterOn) {
+        $baseQuery['status'] = $filterStatus;
+    }
     $pageUrl = function (int $p) use ($baseQuery): string {
         return '?' . http_build_query(array_merge($baseQuery, ['page' => $p]));
     };
 ?>
 <nav class="mt-3">
     <ul class="pagination pagination-sm mb-0 justify-content-center">
-        <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>"><a class="page-link" href="<?= htmlspecialchars($pageUrl(max(1, $page - 1)), ENT_QUOTES, 'UTF-8') ?>">«</a></li>
+        <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>"><a class="page-link" href="<?php echo htmlspecialchars($pageUrl(max(1, $page - 1)), ENT_QUOTES, 'UTF-8'); ?>">«</a></li>
         <?php for ($p = max(1, $page - 3); $p <= min($totalPages, $page + 3); $p++): ?>
-        <li class="page-item <?= $p === $page ? 'active' : '' ?>"><a class="page-link" href="<?= htmlspecialchars($pageUrl($p), ENT_QUOTES, 'UTF-8') ?>"><?= $p ?></a></li>
+        <li class="page-item <?php echo $p === $page ? 'active' : ''; ?>"><a class="page-link" href="<?php echo htmlspecialchars($pageUrl($p), ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlentities((string) (int) $p, ENT_QUOTES, 'UTF-8'); ?></a></li>
         <?php endfor; ?>
-        <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>"><a class="page-link" href="<?= htmlspecialchars($pageUrl(min($totalPages, $page + 1)), ENT_QUOTES, 'UTF-8') ?>">»</a></li>
+        <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>"><a class="page-link" href="<?php echo htmlspecialchars($pageUrl(min($totalPages, $page + 1)), ENT_QUOTES, 'UTF-8'); ?>">»</a></li>
     </ul>
 </nav>
 <?php endif; ?>

@@ -9,20 +9,94 @@ $pdo = Database::getInstance()->getConnection();
 $pageTitle = 'Sistem Yedekleri';
 $activeNav = 'backups';
 
-function secap_dump_binary(): ?string
+function secap_quote_identifier(string $identifier): string
 {
-    $allowedPaths = [
-        '/Applications/XAMPP/xamppfiles/bin/mysqldump',
-        '/usr/bin/mysqldump',
-        '/usr/local/bin/mysqldump',
-        'C:\\xampp\\mysql\\bin\\mysqldump.exe',
-    ];
-    foreach ($allowedPaths as $path) {
-        if (is_executable($path)) {
-            return $path;
-        }
+    return '`' . str_replace('`', '``', $identifier) . '`';
+}
+
+function secap_sql_literal(PDO $pdo, $value): string
+{
+    if ($value === null) {
+        return 'NULL';
     }
-    return null;
+
+    if (is_bool($value)) {
+        return $value ? '1' : '0';
+    }
+
+    $quoted = $pdo->quote((string) $value);
+    if ($quoted === false) {
+        return "'" . str_replace("'", "''", (string) $value) . "'";
+    }
+
+    return $quoted;
+}
+
+function secap_write_database_dump(PDO $pdo, string $databaseName, string $target): array
+{
+    $handle = fopen($target, 'wb');
+    if (!is_resource($handle)) {
+        return [1, 'Yedek dosyası oluşturulamadı.'];
+    }
+
+    try {
+        fwrite($handle, "-- SECAP Portalı veritabanı yedeği\n");
+        fwrite($handle, '-- Oluşturma zamanı: ' . date('Y-m-d H:i:s') . "\n\n");
+        fwrite($handle, "SET NAMES utf8mb4;\n");
+        fwrite($handle, "SET FOREIGN_KEY_CHECKS=0;\n\n");
+
+        $tableStmt = $pdo->prepare(
+            "SELECT TABLE_NAME
+             FROM INFORMATION_SCHEMA.TABLES
+             WHERE TABLE_SCHEMA = :schema_name
+               AND TABLE_TYPE = 'BASE TABLE'
+             ORDER BY TABLE_NAME"
+        );
+        $tableStmt->execute([':schema_name' => $databaseName]);
+        $tables = $tableStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        foreach ($tables as $table) {
+            $tableName = (string) $table;
+            $quotedTable = secap_quote_identifier($tableName);
+            fwrite($handle, "\n-- Tablo: {$tableName}\n");
+            fwrite($handle, "DROP TABLE IF EXISTS {$quotedTable};\n");
+
+            $createStmt = $pdo->query('SHOW CREATE TABLE ' . $quotedTable);
+            $createRow = $createStmt ? $createStmt->fetch(PDO::FETCH_ASSOC) : false;
+            if (!$createRow) {
+                throw new RuntimeException($tableName . ' tablosunun şeması okunamadı.');
+            }
+            $createSql = (string) ($createRow['Create Table'] ?? array_values($createRow)[1] ?? '');
+            if ($createSql === '') {
+                throw new RuntimeException($tableName . ' tablosu için CREATE TABLE çıktısı boş geldi.');
+            }
+            fwrite($handle, $createSql . ";\n\n");
+
+            $dataStmt = $pdo->query('SELECT * FROM ' . $quotedTable);
+            if (!$dataStmt) {
+                throw new RuntimeException($tableName . ' tablosunun verileri okunamadı.');
+            }
+
+            while ($row = $dataStmt->fetch(PDO::FETCH_ASSOC)) {
+                $columns = array_map('secap_quote_identifier', array_keys($row));
+                $values = array_map(
+                    static fn($value): string => secap_sql_literal($pdo, $value),
+                    array_values($row)
+                );
+                fwrite(
+                    $handle,
+                    'INSERT INTO ' . $quotedTable . ' (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $values) . ");\n"
+                );
+            }
+        }
+
+        fwrite($handle, "\nSET FOREIGN_KEY_CHECKS=1;\n");
+        fclose($handle);
+        return [0, 'Yedek başarıyla oluşturuldu.'];
+    } catch (Throwable $e) {
+        fclose($handle);
+        return [1, $e->getMessage()];
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -35,14 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $envConfig = require APP_ROOT . '/ortam.php';
-        $host = (string)($envConfig['DB_HOST'] ?? 'localhost');
-        if ($host === 'localhost') {
-            $host = '127.0.0.1';
-        }
-        $port = (string)($envConfig['DB_PORT'] ?? '3306');
         $db = (string)($envConfig['DB_NAME'] ?? 'secap_portal');
-        $user = (string)($envConfig['DB_USER'] ?? 'root');
-        $pass = (string)($envConfig['DB_PASS'] ?? '');
 
         $filename = 'secap_backup_' . date('Ymd_His') . '.sql';
         $target = $backupDir . '/' . $filename;
@@ -50,49 +117,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $status = 'failed';
         $message = null;
 
-        if (!function_exists('exec')) {
-            $message = 'PHP exec fonksiyonu kapalı olduğu için mysqldump çalıştırılamadı.';
+        [$exitCode, $message] = secap_write_database_dump($pdo, $db, $target);
+        if ($exitCode === 0 && is_file($target) && filesize($target) > 0) {
+            chmod($target, 0664);
+            $status = 'success';
+            $message = $message ?: 'Yedek başarıyla oluşturuldu.';
         } else {
-            $binary = secap_dump_binary();
-            if ($binary === null) {
-                $message = 'mysqldump bulunamadı. İzin verilen yollar kontrol edildi.';
-            } else {
-                $cmd = escapeshellcmd($binary)
-                    . ' --host=' . escapeshellarg($host)
-                    . ' --port=' . escapeshellarg($port)
-                    . ' --user=' . escapeshellarg($user)
-                    . ' --single-transaction --skip-lock-tables --triggers --default-character-set=utf8mb4'
-                    . ' --result-file=' . escapeshellarg($target)
-                    . ' ' . escapeshellarg($db);
-
-                if ($pass !== '') {
-                    if (stripos(PHP_OS_FAMILY, 'Windows') === 0) {
-                        $cmd = 'set MYSQL_PWD=' . escapeshellarg($pass) . ' && ' . $cmd;
-                    } else {
-                        $cmd = 'MYSQL_PWD=' . escapeshellarg($pass) . ' ' . $cmd;
-                    }
-                }
-
-                $output = [];
-                $exitCode = 1;
-                exec($cmd . ' 2>&1', $output, $exitCode);
-                $message = trim(implode("\n", $output));
-                if ($exitCode === 0 && is_file($target) && filesize($target) > 0) {
-                    chmod($target, 0664);
-                    $status = 'success';
-                    $message = $message ?: 'Yedek başarıyla oluşturuldu.';
-                } else {
-                    if (is_file($target) && filesize($target) === 0) {
-                        $realTarget = realpath($target);
-                        $realBackupDir = realpath($backupDir);
-                        if ($realTarget !== false && $realBackupDir !== false
-                            && strpos($realTarget, $realBackupDir . DIRECTORY_SEPARATOR) === 0) {
-                            unlink($realTarget);
-                        }
-                    }
-                    $message = $message ?: 'mysqldump başarısız oldu.';
-                }
-            }
+            $message = $message ?: 'Veritabanı yedeği oluşturulamadı.';
         }
 
         $stmt = $pdo->prepare(
